@@ -1,0 +1,35 @@
+---
+- name: Управление маршрутами RHEL
+  hosts: all
+  become: true
+  connection: ssh
+  vars:
+    operation: "add"  # "add" или "delete"
+    route_dest: "192.168.1.0/24"  # Целевой адрес маршрута
+    route_gw: "192.168.1.1"  # Шлюз маршрута
+#    route_dev: "eth0"  # Устройство сетевого интерфейса
+  tasks:
+    - name: Проверка наличия маршрута (добавление)
+      net_tools:
+        route: "{{ route_dest }}"
+        state: present
+      register: route_check_add
+      when: operation == "add"
+    - name: Проверка наличия маршрута (удаление)
+      net_tools:
+        route: "{{ route_dest }}"
+        state: absent
+      register: route_check_del
+      when: operation == "delete"
+    - name: Добавление маршрута (только если его нет)
+      net_tools:
+        route: "{{ route_dest }}"
+        gw: "{{ route_gw }}"
+        dev: "{{ route_dev }}"
+        state: "{{ operation }}"
+      when: operation == "add" and route_check_add.matched == 0
+    - name: Удаление маршрута (только если он есть)
+      net_tools:
+        route: "{{ route_dest }}"
+        state: "{{ operation }}"
+      when: operation == "delete" and route_check_del.matched == 1
