@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Проверяем количество строк в выводе iptables -n -L INPUT
+lines=$(iptables -n -L INPUT | wc -l)
+
+if [ $lines -gt 2 ]; then
+  echo "OK: iptables has rules"
+  exit 0
+else
+  echo "CRITICAL: iptables has no rules"
+  exit 2
+fi
