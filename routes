@@ -1,35 +1,168 @@
----
-- name: Управление маршрутами RHEL
-  hosts: all
-  become: true
-  connection: ssh
-  vars:
-    operation: "add"  # "add" или "delete"
-    route_dest: "192.168.1.0/24"  # Целевой адрес маршрута
-    route_gw: "192.168.1.1"  # Шлюз маршрута
-#    route_dev: "eth0"  # Устройство сетевого интерфейса
-  tasks:
-    - name: Проверка наличия маршрута (добавление)
-      net_tools:
-        route: "{{ route_dest }}"
-        state: present
-      register: route_check_add
-      when: operation == "add"
-    - name: Проверка наличия маршрута (удаление)
-      net_tools:
-        route: "{{ route_dest }}"
-        state: absent
-      register: route_check_del
-      when: operation == "delete"
-    - name: Добавление маршрута (только если его нет)
-      net_tools:
-        route: "{{ route_dest }}"
-        gw: "{{ route_gw }}"
-        dev: "{{ route_dev }}"
-        state: "{{ operation }}"
-      when: operation == "add" and route_check_add.matched == 0
-    - name: Удаление маршрута (только если он есть)
-      net_tools:
-        route: "{{ route_dest }}"
-        state: "{{ operation }}"
-      when: operation == "delete" and route_check_del.matched == 1
+import subprocess
+import paramiko
+import requests
+import json
+import os
+import base64
+import logging
+from datetime import datetime
+from typing import Dict, List, Tuple
+
+# Настройка логирования
+logging.basicConfig(
+    filename='/home/andrey/works/confluence1.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Конфигурация для Confluence
+CONFLUENCE_URL = "https://your-confluence-domain.atlassian.net/wiki/rest/api/content"
+PAGE_ID = "1550845723"
+USERNAME = "your-email@example.com"  # Замени на свой email
+API_TOKEN = "your-api-token"        # Замени на свой API-токен
+
+# Функция для чтения хостов из файла inventory
+def read_inventory() -> List[Tuple[str, str]]:
+    inventory_path = os.path.join(os.path.dirname(__file__), "inventory")
+    try:
+        with open(inventory_path, "r") as f:
+            hosts = []
+            for line in f:
+                line = line.strip()
+                if line:
+                    parts = line.split()
+                    if len(parts) == 2:  # Формат: hostname ip_address
+                        hostname, ip = parts
+                        hosts.append((hostname, ip))
+                    elif len(parts) == 1:  # Старый формат: только IP
+                        ip = parts[0]
+                        hosts.append((None, ip))
+            return hosts
+    except FileNotFoundError:
+        logging.error(f"Файл {inventory_path} не найден!")
+        return []
+    except Exception as e:
+        logging.error(f"Ошибка при чтении inventory: {e}")
+        return []
+
+# Функция для получения имени хоста и IP-адресов с хоста
+def get_host_data(host: str, predefined_hostname: str = None) -> Tuple[str, Dict[str, List[str]]]:
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Устанавливаем тайм-аут подключения (10 секунд)
+        ssh.connect(host, timeout=10)
+        
+        if predefined_hostname is None:
+            stdin, stdout, stderr = ssh.exec_command("hostname", timeout=5)
+            hostname = stdout.read().decode().strip()
+        else:
+            hostname = predefined_hostname
+        
+        stdin, stdout, stderr = ssh.exec_command("/usr/sbin/ip -4 addr", timeout=5)
+        result = stdout.read().decode()
+        
+        ip_dict = {}
+        lines = result.splitlines()
+        
+        for line in lines:
+            if "inet " in line and "scope global" in line:
+                parts = line.strip().split()
+                ip_with_mask = parts[1]
+                interface = parts[-1]
+                base_interface = interface.split(":")[0]  # Убираем :0, :1 и т.д.
+                if base_interface not in ip_dict:
+                    ip_dict[base_interface] = []
+                ip_dict[base_interface].append(ip_with_mask)
+                
+        ssh.close()
+        return hostname, ip_dict
+    except Exception as e:
+        logging.error(f"Ошибка подключения к {host}: {e}")
+        return host if predefined_hostname is None else predefined_hostname, {}
+
+# Функция для сбора данных со всех хостов из inventory
+def collect_all_ip_data() -> Dict[str, Dict[str, List[str]]]:
+    ip_data = {}
+    remote_hosts = read_inventory()
+    for predefined_hostname, ip in remote_hosts:
+        hostname, ips = get_host_data(ip, predefined_hostname)
+        ip_data[hostname] = ips
+    return ip_data
+
+# Функция для форматирования данных в HTML
+def format_to_html(ip_data: Dict[str, Dict[str, List[str]]]) -> str:
+    update_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    html_content = f"Автоматически обновляемая страница. Последнее обновление: {update_time}<br/>"
+    html_content += "<table><tr><th>Hostname</th><th>Interfaces</th></tr>"
+    
+    for hostname, interfaces in sorted(ip_data.items()):
+        if not interfaces:
+            ip_str = "Нет данных"
+        else:
+            ip_str = "<p>"
+            for iface, ip_list in sorted(interfaces.items()):
+                combined_ips = " ".join(sorted(ip_list))
+                ip_str += f"{iface}: {combined_ips}<br/>"
+            ip_str = ip_str.rstrip("<br/>") + "</p>"
+        html_content += f"<tr><td>{hostname}</td><td>{ip_str}</td></tr>"
+    
+    html_content += "</table>"
+    return html_content
+
+# Функция для обновления страницы в Confluence
+def update_confluence_page(ip_data: Dict[str, Dict[str, List[str]]]):
+    auth_str = f"{USERNAME}:{API_TOKEN}"
+    auth_encoded = base64.b64encode(auth_str.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_encoded}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.get(f"{CONFLUENCE_URL}/{PAGE_ID}", headers=headers, timeout=10)
+        if response.status_code != 200:
+            logging.error(f"Не удалось получить страницу Confluence: {response.status_code} - {response.text}")
+            return
+        
+        current_page = response.json()
+        current_version = current_page["version"]["number"]
+        
+        payload = {
+            "id": PAGE_ID,
+            "type": "page",
+            "title": current_page["title"],
+            "body": {
+                "storage": {
+                    "value": format_to_html(ip_data),
+                    "representation": "storage"
+                }
+            },
+            "version": {
+                "number": current_version + 1
+            }
+        }
+        
+        response = requests.put(
+            f"{CONFLUENCE_URL}/{PAGE_ID}",
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            logging.info("Страница в Confluence успешно обновлена!")
+        else:
+            logging.error(f"Ошибка при обновлении страницы: {response.status_code} - {response.text}")
+    except Exception as e:
+        logging.error(f"Ошибка при работе с Confluence: {e}")
+
+# Основная логика
+if __name__ == "__main__":
+    logging.info("Запуск скрипта для обновления Confluence")
+    ip_data = collect_all_ip_data()
+    if ip_data:
+        update_confluence_page(ip_data)
+    else:
+        logging.warning("Не удалось собрать данные с хостов")
+    logging.info("Скрипт завершил выполнение")
