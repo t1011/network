@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+import socket
+import sys
+import chardet
+from concurrent.futures import ThreadPoolExecutor
+from tabulate import tabulate
+
+def get_tld_server(tld="com"):
+    """
+    Функция для получения WHOIS-сервера для указанного TLD.
+    Возвращает адрес сервера или None в случае ошибки.
+    """
+    try:
+        sock = socket.socket()
+        sock.connect(("whois.iana.org", 43))
+        sock.send("{}\n".format(tld).encode("utf-8"))
+        response = sock.makefile().read()
+        for line in response.split("\n"):
+            parts = line.split(":", 2)
+            if len(parts) > 1:
+                header_name = parts[0].strip()
+                header_value = parts[1].strip()
+                if header_name.lower() == "whois":
+                    return header_value
+    except socket.error as e:
+        print(f"Ошибка подключения к whois.iana.org: {e}")
+        return None
+
+def get_whois_data(domain, server=None):
+    """
+    Функция для получения WHOIS-данных для указанного домена.
+    Использует определение кодировки с помощью chardet.
+    """
+    if not server:
+        tld = domain.split(".")[-1]
+        server = get_tld_server(tld)
+        if not server:
+            return
+
+    nextserver = None
+    try:
+        sock = socket.socket()
+        sock.connect((server, 43))
+        sock.send("{}\n".format(domain).encode("utf-8"))
+        response = sock.makefile().read()
+        encoding = chardet.detect(response.encode())['encoding']
+        response = response.encode().decode(encoding)
+        for line in response.split("\n"):
+            parts = line.split(":", 2)
+            if len(parts) > 1:
+                header_name = parts[0].strip()
+                header_value = parts[1].strip()
+                if header_name.lower() == "whois server":
+                    nextserver = header_value
+            yield line
+    except socket.error as e:
+        print(f"Ошибка подключения к {server}: {e}")
+        return
+
+    if nextserver:
+        for line in get_whois_data(domain, nextserver):
+            yield line
+
+def process_domain(domain):
+    """
+    Функция для обработки WHOIS-данных для одного домена.
+    """
+    data = []
+    for line in get_whois_data(domain):
+        data.append(line)
+    return data
+
+def main():
+    """
+    Основная функция для выполнения скрипта.
+    Поддерживает параллельную обработку нескольких доменов.
+    """
+    if len(sys.argv) < 2:
+        print("Usage: {} domain.com".format(sys.argv[0]))
+        exit(1)
+
+    domains = sys.argv[1:]
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(process_domain, domains)
+
+    for domain, data in zip(domains, results):
+        print(f"WHOIS data for {domain}:")
+        table = []
+        for line in data:
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                table.append([parts[0].strip(), parts[1].strip()])
+        print(tabulate(table, headers=["Field", "Value"], tablefmt="grid"))
+        print()
+
+if __name__ == "__main__":
+    main()
