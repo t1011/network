@@ -1,0 +1,54 @@
+#!/usr/bin/python3
+import requests
+
+# Операторы для поиска
+OPERATORS = ["megafon", "yota", "beeline", "mts", "t2"]
+
+def fetch_servers_by_operator(operator):
+    """Получение данных о серверах для указанного оператора."""
+    url = f"https://www.speedtest.net/api/js/servers?engine=js&limit=1000&search={operator}"
+    filter_country = "Russia"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as e:
+        print(f"Ошибка при запросе данных для {operator}: {e}")
+        return {}
+
+    grouped_data = {}
+    for server in data:
+        country = server['country']
+        city = server['name']
+        if filter_country and country != filter_country:
+            continue
+        if country not in grouped_data:
+            grouped_data[country] = []
+        grouped_data[country].append(city)
+    
+    return grouped_data
+
+def display_results(operator, grouped_data):
+    """Отображение результатов в консоли."""
+    print(f"\n=== {operator.capitalize()} ===")
+    if not grouped_data:
+        print(f"Данные для {operator} отсутствуют")
+    else:
+        for country, cities in grouped_data.items():
+            cities_str = ", ".join(sorted(cities))
+            print(f"Страна: {country}")
+            print(f"Города: {cities_str}")
+
+def main():
+    """Основная логика скрипта."""
+    all_data = {}
+    for operator in OPERATORS:
+        print(f"Сбор данных для {operator}...")
+        all_data[operator] = fetch_servers_by_operator(operator)
+
+    # Выводим результаты в требуемом порядке
+    for operator in ["megafon", "yota", "beeline", "mts", "t2"]:
+        display_results(operator, all_data[operator])
+
+if __name__ == "__main__":
+    main()
