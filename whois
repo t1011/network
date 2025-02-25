@@ -1,90 +1,78 @@
 #!/usr/bin/env python3
 import socket
 import sys
-import chardet
-from concurrent.futures import ThreadPoolExecutor
+import re
 from tabulate import tabulate
 
+def is_ip_address(input_str):
+    """Проверяет, является ли строка IP-адресом."""
+    ip_pattern = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+    return bool(ip_pattern.match(input_str))
+
 def get_tld_server(tld="com"):
-    """
-    Функция для получения WHOIS-сервера для указанного TLD.
-    Возвращает адрес сервера или None в случае ошибки.
-    """
+    """Получает WHOIS-сервер для TLD."""
+    sock = socket.socket()
     try:
-        sock = socket.socket()
         sock.connect(("whois.iana.org", 43))
-        sock.send("{}\n".format(tld).encode("utf-8"))
-        response = sock.makefile().read()
-        for line in response.split("\n"):
-            parts = line.split(":", 2)
-            if len(parts) > 1:
-                header_name = parts[0].strip()
-                header_value = parts[1].strip()
-                if header_name.lower() == "whois":
-                    return header_value
+        sock.send(f"{tld}\n".encode("utf-8"))
+        response = sock.recv(4096).decode("utf-8")
+        for line in response.splitlines():
+            if line.lower().startswith("whois:"):
+                return line.split(":", 1)[1].strip()
     except socket.error as e:
         print(f"Ошибка подключения к whois.iana.org: {e}")
         return None
+    finally:
+        sock.close()
 
-def get_whois_data(domain, server=None):
-    """
-    Функция для получения WHOIS-данных для указанного домена.
-    Использует определение кодировки с помощью chardet.
-    """
+def get_whois_data(query, server=None, is_ip=False):
+    """Получает WHOIS-данные для домена или IP."""
     if not server:
-        tld = domain.split(".")[-1]
-        server = get_tld_server(tld)
-        if not server:
-            return
+        if is_ip:
+            server = "whois.arin.net"  # Начальный сервер для IP
+        else:
+            tld = query.split(".")[-1]
+            server = get_tld_server(tld)
+            if not server:
+                return
 
-    nextserver = None
+    sock = socket.socket()
     try:
-        sock = socket.socket()
         sock.connect((server, 43))
-        sock.send("{}\n".format(domain).encode("utf-8"))
-        response = sock.makefile().read()
-        encoding = chardet.detect(response.encode())['encoding']
-        response = response.encode().decode(encoding)
-        for line in response.split("\n"):
-            parts = line.split(":", 2)
-            if len(parts) > 1:
-                header_name = parts[0].strip()
-                header_value = parts[1].strip()
-                if header_name.lower() == "whois server":
-                    nextserver = header_value
+        sock.send(f"{query}\n".encode("utf-8"))
+        response = sock.recv(4096).decode("utf-8")
+        next_server = None
+        for line in response.splitlines():
+            if is_ip and line.lower().startswith("referralserver:"):
+                next_server = line.split(":", 1)[1].strip().replace("whois://", "")
             yield line
+
+        if next_server:
+            for line in get_whois_data(query, next_server, is_ip=True):
+                yield line
     except socket.error as e:
         print(f"Ошибка подключения к {server}: {e}")
         return
+    finally:
+        sock.close()
 
-    if nextserver:
-        for line in get_whois_data(domain, nextserver):
-            yield line
-
-def process_domain(domain):
-    """
-    Функция для обработки WHOIS-данных для одного домена.
-    """
+def process_query(query):
+    """Обрабатывает запрос и возвращает данные в виде списка."""
+    is_ip = is_ip_address(query)
     data = []
-    for line in get_whois_data(domain):
+    for line in get_whois_data(query, is_ip=is_ip):
         data.append(line)
     return data
 
 def main():
-    """
-    Основная функция для выполнения скрипта.
-    Поддерживает параллельную обработку нескольких доменов.
-    """
     if len(sys.argv) < 2:
-        print("Usage: {} domain.com".format(sys.argv[0]))
+        print(f"Usage: {sys.argv[0]} <domain or IP>")
         exit(1)
 
-    domains = sys.argv[1:]
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        results = executor.map(process_domain, domains)
-
-    for domain, data in zip(domains, results):
-        print(f"WHOIS data for {domain}:")
+    queries = sys.argv[1:]
+    for query in queries:
+        print(f"WHOIS data for {query}:")
+        data = process_query(query)
         table = []
         for line in data:
             parts = line.split(":", 1)
