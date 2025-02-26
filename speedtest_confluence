@@ -3,11 +3,11 @@ import requests
 import json
 from requests.auth import HTTPBasicAuth
 
-# Конфигурация для Confluence API
-CONFLUENCE_URL = "https://your-confluence-domain.atlassian.net/wiki/rest/api/content/15656567"
-CONFLUENCE_USERNAME = "your-email@example.com"  # Ваш email для входа
-CONFLUENCE_API_TOKEN = "your-api-token"        # API-токен из Confluence
-PAGE_ID = "15656567"
+# Конфигурация для Confluence
+CONFLUENCE_URL = "https://your-confluence-domain.atlassian.net/wiki/rest/api/content"
+PAGE_ID = "15656567"  # Замените на ваш актуальный ID страницы
+USERNAME = "your-email@example.com"
+API_TOKEN = "your-api-token"
 
 # Операторы для поиска
 OPERATORS = ["megafon", "yota", "beeline", "mts", "t2"]
@@ -18,7 +18,7 @@ def fetch_servers_by_operator(operator):
     filter_country = "Russia"
     try:
         response = requests.get(url, timeout=10)
-        response.raise_for_status()  # Проверка на ошибки HTTP
+        response.raise_for_status()
         data = response.json()
     except requests.RequestException as e:
         print(f"Ошибка при запросе данных для {operator}: {e}")
@@ -43,7 +43,7 @@ def generate_table(operator, grouped_data):
     
     table_rows = ""
     for country, cities in grouped_data.items():
-        cities_str = ", ".join(sorted(cities))  # Сортировка городов для удобства
+        cities_str = ", ".join(sorted(cities))
         table_rows += f"<tr><td>{country}</td><td>{cities_str}</td></tr>"
     
     return f"""
@@ -55,11 +55,12 @@ def generate_table(operator, grouped_data):
     """
 
 def get_current_page_version():
-    """Получение текущей версии страницы Confluence."""
+    """Получение текущей версии страницы."""
+    page_url = f"{CONFLUENCE_URL}/{PAGE_ID}"
     try:
         response = requests.get(
-            CONFLUENCE_URL,
-            auth=HTTPBasicAuth(CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN)
+            page_url,
+            auth=HTTPBasicAuth(USERNAME, API_TOKEN)
         )
         response.raise_for_status()
         page_data = response.json()
@@ -69,7 +70,8 @@ def get_current_page_version():
         return None
 
 def update_confluence_page(content):
-    """Обновление страницы Confluence через REST API."""
+    """Обновление страницы Confluence."""
+    page_url = f"{CONFLUENCE_URL}/{PAGE_ID}"
     current_version = get_current_page_version()
     if current_version is None:
         print("Не удалось определить версию страницы. Обновление отменено.")
@@ -79,8 +81,7 @@ def update_confluence_page(content):
     payload = {
         "id": PAGE_ID,
         "type": "page",
-        "title": "Speedtest Servers by Operator",  # Укажите нужный заголовок страницы
-        "space": {"key": "YOUR_SPACE_KEY"},       # Укажите ключ пространства
+        "title": "Speedtest Servers by Operator",  # Укажите нужный заголовок
         "body": {
             "storage": {
                 "value": content,
@@ -92,8 +93,8 @@ def update_confluence_page(content):
 
     try:
         response = requests.put(
-            CONFLUENCE_URL,
-            auth=HTTPBasicAuth(CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN),
+            page_url,
+            auth=HTTPBasicAuth(USERNAME, API_TOKEN),
             headers=headers,
             data=json.dumps(payload)
         )
@@ -104,19 +105,16 @@ def update_confluence_page(content):
 
 def main():
     """Основная логика скрипта."""
-    # Собираем данные для всех операторов
     all_data = {}
     for operator in OPERATORS:
         print(f"Сбор данных для {operator}...")
         all_data[operator] = fetch_servers_by_operator(operator)
 
-    # Генерируем таблицы в требуемом порядке
     page_content = ""
     for operator in ["megafon", "yota", "beeline", "mts", "t2"]:
         table = generate_table(operator, all_data[operator])
         page_content += table
 
-    # Обновляем страницу Confluence
     update_confluence_page(page_content)
 
 if __name__ == "__main__":
