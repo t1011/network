@@ -2,6 +2,7 @@
 import requests
 import json
 from requests.auth import HTTPBasicAuth
+from datetime import datetime
 
 # Конфигурация для Confluence
 CONFLUENCE_URL = "https://your-confluence-domain.atlassian.net/wiki/rest/api/content"
@@ -38,18 +39,22 @@ def fetch_servers_by_operator(operator):
 
 def generate_table(operator, grouped_data):
     """Генерация HTML-таблицы для оператора."""
+    # Для MTS используем верхний регистр
+    display_name = "MTS" if operator == "mts" else operator.capitalize()
+
     if not grouped_data:
-        return f"<h2>{operator.capitalize()}</h2><p>Данные для {operator} отсутствуют</p>"
+        return f"<h2>{display_name}</h2><p>Данные для {display_name} отсутствуют</p>"
     
+    # Собираем все города в один список и сортируем
+    all_cities = sorted([city for cities in grouped_data.values() for city in cities])
     table_rows = ""
-    for country, cities in grouped_data.items():
-        cities_str = ", ".join(sorted(cities))
-        table_rows += f"<tr><td>{country}</td><td>{cities_str}</td></tr>"
+    for i, city in enumerate(all_cities, 1):
+        table_rows += f"<tr><td>{i}</td><td>{city}</td></tr>"
     
     return f"""
-    <h2>{operator.capitalize()}</h2>
+    <h2>{display_name}</h2>
     <table>
-        <tr><th>Страна</th><th>Города</th></tr>
+        <tr><th>№</th><th>Город</th></tr>
         {table_rows}
     </table>
     """
@@ -77,14 +82,18 @@ def update_confluence_page(content):
         print("Не удалось определить версию страницы. Обновление отменено.")
         return
 
+    # Получаем текущую дату и время в нужном формате
+    current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+    header = f"<p>Автоматически обновляемая страница. Последнее обновление {current_time}</p>"
+
     headers = {"Content-Type": "application/json"}
     payload = {
         "id": PAGE_ID,
         "type": "page",
-        "title": "Speedtest Servers by Operator",  # Укажите нужный заголовок
+        "title": "Speedtest Servers by Operator",
         "body": {
             "storage": {
-                "value": content,
+                "value": header + content,
                 "representation": "storage"
             }
         },
