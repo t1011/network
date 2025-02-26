@@ -3,6 +3,7 @@ import requests
 import json
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
+import re
 
 # Конфигурация для Confluence
 CONFLUENCE_URL = "https://your-confluence-domain.atlassian.net/wiki/rest/api/content"
@@ -22,16 +23,18 @@ def fetch_servers_by_operator(operator):
         response.raise_for_status()
         data = response.json()
     except requests.RequestException as e:
-        print(f"Ошибка при запроса данных для {operator}: {e}")
+        print(f"Ошибка при запросе данных для {operator}: {e}")
         return []
 
-    # Фильтруем и собираем данные в список словарей
     servers = []
     for server in data:
         if server["country"] == filter_country:
+            # Извлекаем базовый URL (до /speedtest/) с помощью регулярного выражения
+            url_match = re.match(r"(https?:\/\/[^\/]+:\d+)", server["url"])
+            base_url = url_match.group(1) if url_match else "N/A"
             servers.append({
                 "city": server["name"],
-                "url": server["url"].split("/speedtest")[0],  # URL до порта включительно
+                "url": base_url,  # URL до порта включительно
                 "id": server["id"]
             })
     
@@ -39,7 +42,6 @@ def fetch_servers_by_operator(operator):
 
 def generate_table(operator, servers):
     """Генерация HTML-таблицы для оператора."""
-    # Для MTS используем верхний регистр
     display_name = "MTS" if operator == "mts" else operator.capitalize()
 
     if not servers:
@@ -80,7 +82,6 @@ def update_confluence_page(content):
         print("Не удалось определить версию страницы. Обновление отменено.")
         return
 
-    # Получаем текущую дату и время с секундами
     current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     header = f"<p>Автоматически обновляемая страница. Последнее обновление: {current_time}</p>"
 
