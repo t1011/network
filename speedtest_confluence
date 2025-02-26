@@ -22,39 +22,37 @@ def fetch_servers_by_operator(operator):
         response.raise_for_status()
         data = response.json()
     except requests.RequestException as e:
-        print(f"Ошибка при запросе данных для {operator}: {e}")
-        return {}
+        print(f"Ошибка при запроса данных для {operator}: {e}")
+        return []
 
-    grouped_data = {}
+    # Фильтруем и собираем данные в список словарей
+    servers = []
     for server in data:
-        country = server["country"]
-        city = server["name"]
-        if filter_country and country != filter_country:
-            continue
-        if country not in grouped_data:
-            grouped_data[country] = []
-        grouped_data[country].append(city)
+        if server["country"] == filter_country:
+            servers.append({
+                "city": server["name"],
+                "url": server["url"].split("/speedtest")[0],  # URL до порта включительно
+                "id": server["id"]
+            })
     
-    return grouped_data
+    return servers
 
-def generate_table(operator, grouped_data):
+def generate_table(operator, servers):
     """Генерация HTML-таблицы для оператора."""
     # Для MTS используем верхний регистр
     display_name = "MTS" if operator == "mts" else operator.capitalize()
 
-    if not grouped_data:
+    if not servers:
         return f"<h2>{display_name}</h2><p>Данные для {display_name} отсутствуют</p>"
     
-    # Собираем все города в один список и сортируем
-    all_cities = sorted([city for cities in grouped_data.values() for city in cities])
     table_rows = ""
-    for i, city in enumerate(all_cities, 1):
-        table_rows += f"<tr><td>{i}</td><td>{city}</td></tr>"
+    for i, server in enumerate(sorted(servers, key=lambda x: x["city"]), 1):
+        table_rows += f"<tr><td>{i}</td><td>{server['city']}</td><td>{server['url']}</td><td>{server['id']}</td></tr>"
     
     return f"""
     <h2>{display_name}</h2>
     <table>
-        <tr><th>№</th><th>Город</th></tr>
+        <tr><th>№</th><th>Город</th><th>URL</th><th>ID</th></tr>
         {table_rows}
     </table>
     """
@@ -82,9 +80,9 @@ def update_confluence_page(content):
         print("Не удалось определить версию страницы. Обновление отменено.")
         return
 
-    # Получаем текущую дату и время в нужном формате
-    current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
-    header = f"<p>Автоматически обновляемая страница. Последнее обновление {current_time}</p>"
+    # Получаем текущую дату и время с секундами
+    current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    header = f"<p>Автоматически обновляемая страница. Последнее обновление: {current_time}</p>"
 
     headers = {"Content-Type": "application/json"}
     payload = {
