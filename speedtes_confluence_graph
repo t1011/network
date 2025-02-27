@@ -1,0 +1,210 @@
+#!/usr/bin/python3
+import requests
+import json
+from requests.auth import HTTPBasicAuth
+from datetime import datetime
+import re
+import matplotlib.pyplot as plt
+import io
+import base64
+import os
+
+# Конфигурация для Confluence
+CONFLUENCE_URL = "https://your-confluence-domain.atlassian.net/wiki/rest/api/content"
+PAGE_ID = "15656567"  # Замените на ваш актуальный ID страницы
+USERNAME = "your-email@example.com"
+API_TOKEN = "your-api-token"
+
+# Операторы для поиска
+OPERATORS = ["megafon", "yota", "beeline", "mts", "t2"]
+
+# Путь к файлу для хранения истории
+HISTORY_FILE = "server_history.json"
+
+def fetch_servers_by_operator(operator):
+    """Получение данных о серверах для указанного оператора."""
+    url = f"https://www.speedtest.net/api/js/servers?engine=js&limit=1000&search={operator}"
+    filter_country = "Russia"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as e:
+        print(f"Ошибка при запросе данных для {operator}: {e}")
+        return []
+
+    servers = []
+    for server in data:
+        if server["country"] == filter_country:
+            url_match = re.match(r"(https?:\/\/[^\/]+:\d+)", server["url"])
+            base_url = url_match.group(1) if url_match else "N/A"
+            servers.append({
+                "city": server["name"],
+                "url": base_url,
+                "id": server["id"]
+            })
+    
+    return servers
+
+def generate_table(operator, servers):
+    """Генерация HTML-таблицы для оператора."""
+    display_name = "MTS" if operator == "mts" else operator.capitalize()
+
+    if not servers:
+        return f"<h2>{display_name}</h2><p>Данные для {display_name} отсутствуют</p>"
+    
+    table_rows = ""
+    for i, server in enumerate(sorted(servers, key=lambda x: x["city"]), 1):
+        table_rows += f"<tr><td>{i}</td><td>{server['city']}</td><td>{server['url']}</td><td>{server['id']}</td></tr>"
+    
+    return f"""
+    <h2>{display_name}</h2>
+    <table>
+        <tr><th>№</th><th>Город</th><th>URL</th><th>ID</th></tr>
+        {table_rows}
+    </table>
+    """
+
+def load_history():
+    """Загрузка истории из файла."""
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_history(history, all_data):
+    """Сохранение текущих данных в историю."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    counts = {op: len(all_data[op]) for op in OPERATORS}
+    
+    if "megafon_yota" not in history:
+        history["megafon_yota"] = []
+    if "beeline" not in history:
+        history["beeline"] = []
+    if "mts" not in history:
+        history["mts"] = []
+    if "t2" not in history:
+        history["t2"] = []
+
+    history["megafon_yota"].append({"time": timestamp, "count": counts["megafon"] + counts["yota"]})
+    history["beeline"].append({"time": timestamp, "count": counts["beeline"]})
+    history["mts"].append({"time": timestamp, "count": counts["mts"]})
+    history["t2"].append({"time": timestamp, "count": counts["t2"]})
+
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=4)
+
+def generate_time_chart(history):
+    """Генерация графика зависимости количества серверов от времени."""
+    plt.figure(figsize=(10, 6))
+
+    # Данные для графика
+    categories = {
+        "MegaFon + Yota": {"data": history.get("megafon_yota", []), "color": "green"},
+        "Beeline": {"data": history.get("beeline", []), "color": "yellow"},
+        "MTS": {"data": history.get("mts", []), "color": "red"},
+        "T2": {"data": history.get("t2", []), "color": "black"}
+    }
+
+    for label, info in categories.items():
+        times = [entry["time"] for entry in info["data"]]
+        counts = [entry["count"] for entry in info["data"]]
+        if times:
+            plt.plot(times, counts, label=label, color=info["color"], marker='o')
+
+    plt.title("Количество серверов по времени")
+    plt.xlabel("Время")
+    plt.ylabel("Количество серверов")
+    plt.legend()
+    plt.xticks(rotation=45, ha="right")
+    plt.grid(True, linestyle="--", alpha=0.7)
+
+    # Сохраняем график в буфер
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    buf.close()
+    plt.close()
+
+    return f'<img src="data:image/png;base64,{img_base64}" alt="Server Count Over Time"/>'
+
+def get_current_page_version():
+    """Получение текущей версии страницы."""
+    page_url = f"{CONFLUENCE_URL}/{PAGE_ID}"
+    try:
+        response = requests.get(
+            page_url,
+            auth=HTTPBasicAuth(USERNAME, API_TOKEN)
+        )
+        response.raise_for_status()
+        page_data = response.json()
+        return page_data["version"]["number"]
+    except requests.RequestException as e:
+        print(f"Ошибка при получении версии страницы: {e}")
+        return None
+
+def update_confluence_page(content, chart_html):
+    """Обновление страницы Confluence с графиком."""
+    page_url = f"{CONFLUENCE_URL}/{PAGE_ID}"
+    current_version = get_current_page_version()
+    if current_version is None:
+        print("Не удалось определить версию страницы. Обновление отменено.")
+        return
+
+    current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    header = f"<p>Автоматически обновляемая страница. Последнее обновление: {current_time}</p>"
+
+    full_content = header + chart_html + content
+
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "id": PAGE_ID,
+        "type": "page",
+        "title": "Speedtest Servers by Operator",
+        "body": {
+            "storage": {
+                "value": full_content,
+                "representation": "storage"
+            }
+        },
+        "version": {"number": current_version + 1}
+    }
+
+    try:
+        response = requests.put(
+            page_url,
+            auth=HTTPBasicAuth(USERNAME, API_TOKEN),
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        response.raise_for_status()
+        print("Страница Confluence успешно обновлена.")
+    except requests.RequestException as e:
+        print(f"Ошибка при обновлении страницы Confluence: {e}")
+
+def main():
+    """Основная логика скрипта."""
+    all_data = {}
+    for operator in OPERATORS:
+        print(f"Сбор данных для {operator}...")
+        all_data[operator] = fetch_servers_by_operator(operator)
+
+    # Загружаем и обновляем историю
+    history = load_history()
+    save_history(history, all_data)
+
+    # Генерируем график
+    chart_html = generate_time_chart(history)
+
+    # Генерируем таблицы
+    page_content = ""
+    for operator in ["megafon", "yota", "beeline", "mts", "t2"]:
+        table = generate_table(operator, all_data[operator])
+        page_content += table
+
+    # Обновляем страницу
+    update_confluence_page(page_content, chart_html)
+
+if __name__ == "__main__":
+    main()
