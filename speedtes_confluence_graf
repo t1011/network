@@ -94,22 +94,14 @@ def save_history(history, all_data):
         json.dump(history, f, indent=4)
 
 def generate_time_chart(history):
-    """Генерация графика с Solarized Light и осью Y от 0."""
+    """Генерация графика с осью Y от 0."""
     plt.figure(figsize=(10, 6))
 
-    # Solarized Light палитра
-    plt.rcParams['axes.facecolor'] = '#fdf6e3'  # Светлый фон
-    plt.rcParams['figure.facecolor'] = '#fdf6e3'
-    plt.rcParams['text.color'] = '#657b83'      # Цвет текста
-    plt.rcParams['axes.labelcolor'] = '#657b83'
-    plt.rcParams['xtick.color'] = '#657b83'
-    plt.rcParams['ytick.color'] = '#657b83'
-
     categories = {
-        "MegaFon + Yota": {"data": history.get("megafon_yota", []), "color": "#859900"},  # Зелёный
-        "Beeline": {"data": history.get("beeline", []), "color": "#b58900"},         # Жёлтый
-        "MTS": {"data": history.get("mts", []), "color": "#dc322f"},            # Красный
-        "T2": {"data": history.get("t2", []), "color": "#073642"}             # Тёмно-синий (для чёрного)
+        "MegaFon + Yota": {"data": history.get("megafon_yota", []), "color": "green"},
+        "Beeline": {"data": history.get("beeline", []), "color": "yellow"},
+        "MTS": {"data": history.get("mts", []), "color": "red"},
+        "T2": {"data": history.get("t2", []), "color": "black"}
     }
 
     has_data = False
@@ -131,8 +123,8 @@ def generate_time_chart(history):
         plt.ylabel("Количество серверов")
         plt.legend()
         plt.xticks(rotation=45, ha="right")
-        plt.grid(True, linestyle="--", color="#93a1a1", alpha=0.7)  # Сетка в Solarized стиле
-        plt.ylim(0, max_count * 1.1)  # Ось Y начинается с 0, верхний предел на 10% выше максимума
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.ylim(0, max_count * 1.1)  # Ось Y от 0
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -149,7 +141,6 @@ def upload_chart_to_confluence(chart_data):
     headers = {"X-Atlassian-Token": "no-check"}
     files = {"file": ("chart.png", chart_data, "image/png")}
 
-    # Проверяем существующие вложения
     response = requests.get(attachment_url, auth=HTTPBasicAuth(USERNAME, API_TOKEN))
     if response.status_code == 200:
         attachments = response.json().get("results", [])
@@ -165,7 +156,6 @@ def upload_chart_to_confluence(chart_data):
                 response.raise_for_status()
                 return
 
-    # Если вложения нет, создаём новое
     response = requests.post(
         attachment_url,
         auth=HTTPBasicAuth(USERNAME, API_TOKEN),
@@ -197,7 +187,6 @@ def update_confluence_page(content, chart_data):
         print("Не удалось определить версию страницы. Обновление отменено.")
         return
 
-    # Загружаем график как вложение
     upload_chart_to_confluence(chart_data)
 
     current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
@@ -239,20 +228,16 @@ def main():
         print(f"Сбор данных для {operator}...")
         all_data[operator] = fetch_servers_by_operator(operator)
 
-    # Загружаем и обновляем историю
     history = load_history()
     save_history(history, all_data)
 
-    # Генерируем график
     chart_data = generate_time_chart(history)
 
-    # Генерируем таблицы
     page_content = ""
     for operator in ["megafon", "yota", "beeline", "mts", "t2"]:
         table = generate_table(operator, all_data[operator])
         page_content += table
 
-    # Обновляем страницу
     update_confluence_page(page_content, chart_data)
 
 if __name__ == "__main__":
