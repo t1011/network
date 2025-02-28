@@ -72,8 +72,8 @@ def load_history():
     return {}
 
 def save_history(history, all_data):
-    """Сохранение текущих данных в историю."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """Сохранение текущих данных в историю без секунд."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")  # Убраны секунды
     counts = {op: len(all_data[op]) for op in OPERATORS}
     
     if "megafon_yota" not in history:
@@ -94,7 +94,7 @@ def save_history(history, all_data):
         json.dump(history, f, indent=4)
 
 def generate_time_chart(history):
-    """Генерация графика зависимости количества серверов от времени."""
+    """Генерация графика с временем без секунд."""
     plt.figure(figsize=(10, 6))
 
     categories = {
@@ -125,7 +125,6 @@ def generate_time_chart(history):
         plt.xticks(rotation=45, ha="right")
         plt.grid(True, linestyle="--", alpha=0.7)
 
-    # Сохраняем график в буфер
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     buf.seek(0)
@@ -133,7 +132,6 @@ def generate_time_chart(history):
     buf.close()
     plt.close()
 
-    # Сохраняем локально для отладки
     with open("chart_debug.png", "wb") as f:
         f.write(chart_data)
     print("Отладка: График сохранён локально как chart_debug.png")
@@ -141,20 +139,20 @@ def generate_time_chart(history):
     return chart_data
 
 def upload_chart_to_confluence(chart_data):
-    """Загрузка графика как вложения в Confluence."""
+    """Загрузка или обновление графика как вложения в Confluence."""
     attachment_url = f"{CONFLUENCE_URL}/{PAGE_ID}/child/attachment"
-    headers = {"X-Atlassian-Token": "no-check"}  # Отключаем CSRF-проверку для вложений
+    headers = {"X-Atlassian-Token": "no-check"}
     files = {"file": ("chart.png", chart_data, "image/png")}
 
-    # Проверяем, существует ли уже вложение, чтобы обновить его
+    # Проверяем существующие вложения
     response = requests.get(attachment_url, auth=HTTPBasicAuth(USERNAME, API_TOKEN))
     if response.status_code == 200:
         attachments = response.json().get("results", [])
         for attachment in attachments:
             if attachment["title"] == "chart.png":
                 # Обновляем существующее вложение
-                update_url = f"{attachment_url}/{attachment['id']}"
-                response = requests.put(
+                update_url = f"{attachment_url}/{attachment['id']}/data"  # Исправлен endpoint для обновления
+                response = requests.post(  # Используем POST для обновления данных вложения
                     update_url,
                     auth=HTTPBasicAuth(USERNAME, API_TOKEN),
                     headers=headers,
