@@ -6,7 +6,6 @@ from datetime import datetime
 import re
 import matplotlib.pyplot as plt
 import io
-import base64
 import os
 
 # Конфигурация для Confluence
@@ -111,14 +110,13 @@ def generate_time_chart(history):
         counts = [entry["count"] for entry in info["data"]]
         if times:
             has_data = True
-            print(f"Отладка: {label} - Времена: {times}, Значения: {counts}")  # Отладочный вывод
+            print(f"Отладка: {label} - Времена: {times}, Значения: {counts}")
             plt.plot(times, counts, label=label, color=info["color"], marker='o')
 
     if not has_data:
         print("Отладка: Нет данных для построения графика")
         plt.text(0.5, 0.5, "Нет данных для графика", fontsize=12, ha='center', va='center')
         plt.axis('off')
-
     else:
         plt.title("Количество серверов по времени")
         plt.xlabel("Время")
@@ -131,16 +129,50 @@ def generate_time_chart(history):
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    chart_data = buf.read()
     buf.close()
     plt.close()
 
-    # Сохраняем график локально для проверки
+    # Сохраняем локально для отладки
     with open("chart_debug.png", "wb") as f:
-        f.write(base64.b64decode(img_base64))
+        f.write(chart_data)
     print("Отладка: График сохранён локально как chart_debug.png")
 
-    return f'<img src="data:image/png;base64,{img_base64}" alt="Server Count Over Time"/>'
+    return chart_data
+
+def upload_chart_to_confluence(chart_data):
+    """Загрузка графика как вложения в Confluence."""
+    attachment_url = f"{CONFLUENCE_URL}/{PAGE_ID}/child/attachment"
+    headers = {"X-Atlassian-Token": "no-check"}  # Отключаем CSRF-проверку для вложений
+    files = {"file": ("chart.png", chart_data, "image/png")}
+
+    # Проверяем, существует ли уже вложение, чтобы обновить его
+    response = requests.get(attachment_url, auth=HTTPBasicAuth(USERNAME, API_TOKEN))
+    if response.status_code == 200:
+        attachments = response.json().get("results", [])
+        for attachment in attachments:
+            if attachment["title"] == "chart.png":
+                # Обновляем существующее вложение
+                update_url = f"{attachment_url}/{attachment['id']}"
+                response = requests.put(
+                    update_url,
+                    auth=HTTPBasicAuth(USERNAME, API_TOKEN),
+                    headers=headers,
+                    files=files
+                )
+                response.raise_for_status()
+                print("График обновлён как вложение.")
+                return
+
+    # Если вложения нет, создаём новое
+    response = requests.post(
+        attachment_url,
+        auth=HTTPBasicAuth(USERNAME, API_TOKEN),
+        headers=headers,
+        files=files
+    )
+    response.raise_for_status()
+    print("График загружен как новое вложение.")
 
 def get_current_page_version():
     """Получение текущей версии страницы."""
@@ -157,16 +189,20 @@ def get_current_page_version():
         print(f"Ошибка при получении версии страницы: {e}")
         return None
 
-def update_confluence_page(content, chart_html):
-    """Обновление страницы Confluence с графиком."""
+def update_confluence_page(content, chart_data):
+    """Обновление страницы Confluence с графиком как вложением."""
     page_url = f"{CONFLUENCE_URL}/{PAGE_ID}"
     current_version = get_current_page_version()
     if current_version is None:
         print("Не удалось определить версию страницы. Обновление отменено.")
         return
 
+    # Загружаем график как вложение
+    upload_chart_to_confluence(chart_data)
+
     current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     header = f"<p>Автоматически обновляемая страница. Последнее обновление: {current_time}</p>"
+    chart_html = '<ac:image><ri:attachment ri:filename="chart.png"/></ac:image>'
 
     full_content = header + chart_html + content
 
@@ -208,8 +244,7 @@ def main():
     save_history(history, all_data)
 
     # Генерируем график
-    chart_html = generate_time_chart(history)
-    print(f"Отладка: HTML графика: {chart_html[:100]}...")  # Показываем начало HTML
+    chart_data = generate_time_chart(history)
 
     # Генерируем таблицы
     page_content = ""
@@ -218,7 +253,7 @@ def main():
         page_content += table
 
     # Обновляем страницу
-    update_confluence_page(page_content, chart_html)
+    update_confluence_page(page_content, chart_data)
 
 if __name__ == "__main__":
     main()
