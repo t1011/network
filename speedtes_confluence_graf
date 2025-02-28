@@ -94,22 +94,32 @@ def save_history(history, all_data):
         json.dump(history, f, indent=4)
 
 def generate_time_chart(history):
-    """Генерация графика зависимости количества серверов от времени."""
+    """Генерация графика с Solarized Light и осью Y от 0."""
     plt.figure(figsize=(10, 6))
 
+    # Solarized Light палитра
+    plt.rcParams['axes.facecolor'] = '#fdf6e3'  # Светлый фон
+    plt.rcParams['figure.facecolor'] = '#fdf6e3'
+    plt.rcParams['text.color'] = '#657b83'      # Цвет текста
+    plt.rcParams['axes.labelcolor'] = '#657b83'
+    plt.rcParams['xtick.color'] = '#657b83'
+    plt.rcParams['ytick.color'] = '#657b83'
+
     categories = {
-        "MegaFon + Yota": {"data": history.get("megafon_yota", []), "color": "green"},
-        "Beeline": {"data": history.get("beeline", []), "color": "yellow"},
-        "MTS": {"data": history.get("mts", []), "color": "red"},
-        "T2": {"data": history.get("t2", []), "color": "black"}
+        "MegaFon + Yota": {"data": history.get("megafon_yota", []), "color": "#859900"},  # Зелёный
+        "Beeline": {"data": history.get("beeline", []), "color": "#b58900"},         # Жёлтый
+        "MTS": {"data": history.get("mts", []), "color": "#dc322f"},            # Красный
+        "T2": {"data": history.get("t2", []), "color": "#073642"}             # Тёмно-синий (для чёрного)
     }
 
     has_data = False
+    max_count = 0
     for label, info in categories.items():
         times = [entry["time"] for entry in info["data"]]
         counts = [entry["count"] for entry in info["data"]]
         if times:
             has_data = True
+            max_count = max(max_count, max(counts))
             plt.plot(times, counts, label=label, color=info["color"], marker='o')
 
     if not has_data:
@@ -121,7 +131,8 @@ def generate_time_chart(history):
         plt.ylabel("Количество серверов")
         plt.legend()
         plt.xticks(rotation=45, ha="right")
-        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.grid(True, linestyle="--", color="#93a1a1", alpha=0.7)  # Сетка в Solarized стиле
+        plt.ylim(0, max_count * 1.1)  # Ось Y начинается с 0, верхний предел на 10% выше максимума
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -144,7 +155,6 @@ def upload_chart_to_confluence(chart_data):
         attachments = response.json().get("results", [])
         for attachment in attachments:
             if attachment["title"] == "chart.png":
-                # Обновляем существующее вложение
                 update_url = f"{attachment_url}/{attachment['id']}/data"
                 response = requests.post(
                     update_url,
