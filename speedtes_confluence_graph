@@ -73,7 +73,7 @@ def load_history():
 
 def save_history(history, all_data):
     """Сохранение текущих данных в историю без секунд."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")  # Убраны секунды
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     counts = {op: len(all_data[op]) for op in OPERATORS}
     
     if "megafon_yota" not in history:
@@ -94,7 +94,7 @@ def save_history(history, all_data):
         json.dump(history, f, indent=4)
 
 def generate_time_chart(history):
-    """Генерация графика с временем без секунд."""
+    """Генерация графика зависимости количества серверов от времени."""
     plt.figure(figsize=(10, 6))
 
     categories = {
@@ -110,11 +110,9 @@ def generate_time_chart(history):
         counts = [entry["count"] for entry in info["data"]]
         if times:
             has_data = True
-            print(f"Отладка: {label} - Времена: {times}, Значения: {counts}")
             plt.plot(times, counts, label=label, color=info["color"], marker='o')
 
     if not has_data:
-        print("Отладка: Нет данных для построения графика")
         plt.text(0.5, 0.5, "Нет данных для графика", fontsize=12, ha='center', va='center')
         plt.axis('off')
     else:
@@ -132,10 +130,6 @@ def generate_time_chart(history):
     buf.close()
     plt.close()
 
-    with open("chart_debug.png", "wb") as f:
-        f.write(chart_data)
-    print("Отладка: График сохранён локально как chart_debug.png")
-
     return chart_data
 
 def upload_chart_to_confluence(chart_data):
@@ -151,15 +145,14 @@ def upload_chart_to_confluence(chart_data):
         for attachment in attachments:
             if attachment["title"] == "chart.png":
                 # Обновляем существующее вложение
-                update_url = f"{attachment_url}/{attachment['id']}/data"  # Исправлен endpoint для обновления
-                response = requests.post(  # Используем POST для обновления данных вложения
+                update_url = f"{attachment_url}/{attachment['id']}/data"
+                response = requests.post(
                     update_url,
                     auth=HTTPBasicAuth(USERNAME, API_TOKEN),
                     headers=headers,
                     files=files
                 )
                 response.raise_for_status()
-                print("График обновлён как вложение.")
                 return
 
     # Если вложения нет, создаём новое
@@ -170,7 +163,6 @@ def upload_chart_to_confluence(chart_data):
         files=files
     )
     response.raise_for_status()
-    print("График загружен как новое вложение.")
 
 def get_current_page_version():
     """Получение текущей версии страницы."""
