@@ -2,35 +2,27 @@
 
 ES_HOST="http://msk-tp-vasp-dn01:9200"
 
-# Запрос к Elasticsearch за 3 дня с xmnpml
-response=$(curl -s --max-time 5 -XGET "${ES_HOST}/msk-tp-nginx-logs-*/_search" -H 'Content-Type: application/json' -d '{
+# Базовый запрос для фильтрации по времени и xmnpml
+base_query='{
   "timeout": "5s",
   "size": 0,
   "query": {
     "bool": {
       "must": [
         { "query_string": { "query": "request: xmnpml", "analyze_wildcard": true } },
-        { "range": { "@timestamp": { "gte": "2025-03-01T00:00:00", "lte": "2025-03-03T23:59:59" } } }
+        { "range": { "@timestamp": { "gte": "now-1m/m", "lte": "now-1m/m" } } }
       ],
       "must_not": [ { "match_phrase": { "request": "/" } } ]
     }
-  },
-  "aggs": {
-    "by_response": {
-      "terms": { "field": "response" }
-    }
   }
-}')
+}'
 
-# Отладка
-echo "Raw response: $response" >&2
-
-# Извлечение значений
-total=$(echo "$response" | jq -r '.hits.total')
-resp_2xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^2")) | .doc_count] | add // 0')
-resp_3xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^3")) | .doc_count] | add // 0')
-resp_4xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^4")) | .doc_count] | add // 0')
-resp_5xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^5")) | .doc_count] | add // 0')
+# Запросы для каждого диапазона кодов и общего количества
+resp_2xx=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d "$(echo "$base_query" | jq '.query.bool.must[0].query_string.query = "request: xmnpml AND response: 2**"')" | jq -r '.hits.total')
+resp_3xx=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d "$(echo "$base_query" | jq '.query.bool.must[0].query_string.query = "request: xmnpml AND response: 3**"')" | jq -r '.hits.total')
+resp_4xx=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d "$(echo "$base_query" | jq '.query.bool.must[0].query_string.query = "request: xmnpml AND response: 4**"')" | jq -r '.hits.total')
+resp_5xx=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d "$(echo "$base_query" | jq '.query.bool.must[0].query_string.query = "request: xmnpml AND response: 5**"')" | jq -r '.hits.total')
+total=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d "$base_query" | jq -r '.hits.total')
 
 # Корректировка из-за дублирования
 total_corrected=$((total / 2))
@@ -39,9 +31,9 @@ resp_3xx_corrected=$((resp_3xx / 2))
 resp_4xx_corrected=$((resp_4xx / 2))
 resp_5xx_corrected=$((resp_5xx / 2))
 
-# Вывод
+# Проверка и вывод
 if [[ -z "$total_corrected" || "$total_corrected" == "null" ]]; then
-  echo "0 total responses from Mar 1 to Mar 3 to xmnpml requests in Kibana | total=0 resp_2xx=0 resp_3xx=0 resp_4xx=0 resp_5xx=0"
+  echo "0 total responses last 1 min to xmnpml requests in Kibana | total=0 resp_2xx=0 resp_3xx=0 resp_4xx=0 resp_5xx=0"
 else
-  echo "$total_corrected total responses from Mar 1 to Mar 3 to xmnpml requests in Kibana | total=$total_corrected resp_2xx=$resp_2xx_corrected resp_3xx=$resp_3xx_corrected resp_4xx=$resp_4xx_corrected resp_5xx=$resp_5xx_corrected"
+  echo "$total_corrected total responses last 1 min to xmnpml requests in Kibana | total=$total_corrected resp_2xx=$resp_2xx_corrected resp_3xx=$resp_3xx_corrected resp_4xx=$resp_4xx_corrected resp_5xx=$resp_5xx_corrected"
 fi
