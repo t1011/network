@@ -2,54 +2,46 @@
 
 ES_HOST="http://msk-tp-vasp-dn01:9200"
 
-# Расширяем диапазон до 15 минут для проверки
-response=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d '{
+# Запрос к Elasticsearch за 3 дня с xmnpml
+response=$(curl -s --max-time 5 -XGET "${ES_HOST}/msk-tp-nginx-logs-*/_search" -H 'Content-Type: application/json' -d '{
   "timeout": "5s",
   "size": 0,
   "query": {
     "bool": {
       "must": [
         { "query_string": { "query": "request: xmnpml", "analyze_wildcard": true } },
-        { "range": { "@timestamp": { "gte": "now-15m", "lte": "now" } } }
+        { "range": { "@timestamp": { "gte": "2025-03-01T00:00:00", "lte": "2025-03-03T23:59:59" } } }
       ],
       "must_not": [ { "match_phrase": { "request": "/" } } ]
     }
   },
   "aggs": {
     "by_response": {
-      "range": {
-        "field": "response",
-        "ranges": [
-          { "from": 200, "to": 299 },
-          { "from": 300, "to": 399 },
-          { "from": 400, "to": 499 },
-          { "from": 500, "to": 599 }
-        ]
-      }
+      "terms": { "field": "response" }
     }
   }
 }')
 
-# Сохраняем полный ответ для отладки
+# Отладка
 echo "Raw response: $response" >&2
 
 # Извлечение значений
 total=$(echo "$response" | jq -r '.hits.total')
-resp_2xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[0].doc_count // 0')
-resp_3xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[1].doc_count // 0')
-resp_4xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[2].doc_count // 0')
-resp_5xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[3].doc_count // 0')
+resp_2xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^2")) | .doc_count] | add // 0')
+resp_3xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^3")) | .doc_count] | add // 0')
+resp_4xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^4")) | .doc_count] | add // 0')
+resp_5xx=$(echo "$response" | jq -r '[.aggregations.by_response.buckets[] | select(.key | test("^5")) | .doc_count] | add // 0')
 
-# Корректировка из-за дублирования логов
+# Корректировка из-за дублирования
 total_corrected=$((total / 2))
 resp_2xx_corrected=$((resp_2xx / 2))
 resp_3xx_corrected=$((resp_3xx / 2))
 resp_4xx_corrected=$((resp_4xx / 2))
 resp_5xx_corrected=$((resp_5xx / 2))
 
-# Вывод для мониторинга
+# Вывод
 if [[ -z "$total_corrected" || "$total_corrected" == "null" ]]; then
-  echo "0 total responses last 15 min to xmnpml requests in Kibana | total=0 resp_2xx=0 resp_3xx=0 resp_4xx=0 resp_5xx=0"
+  echo "0 total responses from Mar 1 to Mar 3 to xmnpml requests in Kibana | total=0 resp_2xx=0 resp_3xx=0 resp_4xx=0 resp_5xx=0"
 else
-  echo "$total_corrected total responses last 15 min to xmnpml requests in Kibana | total=$total_corrected resp_2xx=$resp_2xx_corrected resp_3xx=$resp_3xx_corrected resp_4xx=$resp_4xx_corrected resp_5xx=$resp_5xx_corrected"
+  echo "$total_corrected total responses from Mar 1 to Mar 3 to xmnpml requests in Kibana | total=$total_corrected resp_2xx=$resp_2xx_corrected resp_3xx=$resp_3xx_corrected resp_4xx=$resp_4xx_corrected resp_5xx=$resp_5xx_corrected"
 fi
