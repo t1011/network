@@ -2,7 +2,7 @@
 
 ES_HOST="http://msk-tp-vasp-dn01:9200"
 
-# Запрос к Elasticsearch за последнюю минуту с агрегацией по кодам ответа
+# Расширяем диапазон до 15 минут для проверки
 response=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: application/json' -d '{
   "timeout": "5s",
   "size": 0,
@@ -10,7 +10,7 @@ response=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: app
     "bool": {
       "must": [
         { "query_string": { "query": "request: xmnpml", "analyze_wildcard": true } },
-        { "range": { "@timestamp": { "gte": "now-1m/m", "lte": "now-1m/m" } } }
+        { "range": { "@timestamp": { "gte": "now-15m", "lte": "now" } } }
       ],
       "must_not": [ { "match_phrase": { "request": "/" } } ]
     }
@@ -28,25 +28,28 @@ response=$(curl -s --max-time 5 -XGET "${ES_HOST}/_search" -H 'Content-Type: app
       }
     }
   }
-}' | jq -r '{total: .hits.total, aggs: .aggregations.by_response.buckets}')
+}')
+
+# Сохраняем полный ответ для отладки
+echo "Raw response: $response" >&2
 
 # Извлечение значений
-total=$(echo "$response" | jq -r '.total')
-resp_2xx=$(echo "$response" | jq -r '.aggs[0].doc_count')
-resp_3xx=$(echo "$response" | jq -r '.aggs[1].doc_count')
-resp_4xx=$(echo "$response" | jq -r '.aggs[2].doc_count')
-resp_5xx=$(echo "$response" | jq -r '.aggs[3].doc_count')
+total=$(echo "$response" | jq -r '.hits.total')
+resp_2xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[0].doc_count // 0')
+resp_3xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[1].doc_count // 0')
+resp_4xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[2].doc_count // 0')
+resp_5xx=$(echo "$response" | jq -r '.aggregations.by_response.buckets[3].doc_count // 0')
 
-# Корректировка из-за дублирования логов (деление на 2)
+# Корректировка из-за дублирования логов
 total_corrected=$((total / 2))
 resp_2xx_corrected=$((resp_2xx / 2))
 resp_3xx_corrected=$((resp_3xx / 2))
 resp_4xx_corrected=$((resp_4xx / 2))
 resp_5xx_corrected=$((resp_5xx / 2))
 
-# Проверка результата и вывод
+# Вывод для мониторинга
 if [[ -z "$total_corrected" || "$total_corrected" == "null" ]]; then
-  echo "0 total responses last 1 min to xmnpml requests in Kibana | total=0 resp_2xx=0 resp_3xx=0 resp_4xx=0 resp_5xx=0"
+  echo "0 total responses last 15 min to xmnpml requests in Kibana | total=0 resp_2xx=0 resp_3xx=0 resp_4xx=0 resp_5xx=0"
 else
-  echo "$total_corrected total responses last 1 min to xmnpml requests in Kibana | total=$total_corrected resp_2xx=$resp_2xx_corrected resp_3xx=$resp_3xx_corrected resp_4xx=$resp_4xx_corrected resp_5xx=$resp_5xx_corrected"
+  echo "$total_corrected total responses last 15 min to xmnpml requests in Kibana | total=$total_corrected resp_2xx=$resp_2xx_corrected resp_3xx=$resp_3xx_corrected resp_4xx=$resp_4xx_corrected resp_5xx=$resp_5xx_corrected"
 fi
