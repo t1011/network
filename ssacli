@@ -10,14 +10,15 @@
       changed_when: false
       failed_when: disk_models.rc != 0 and disk_models.rc != 1  # Игнорируем ошибки, если контроллера нет
 
-    - name: Collect disk models from all hosts
+    - name: Aggregate all disk models
       ansible.builtin.set_fact:
-        all_unique_models: "{{ (ansible_facts.all_unique_models | default([])) | union(disk_models.stdout_lines) }}"
+        all_unique_models: "{{ (ansible_play_hosts | map('extract', hostvars, 'disk_models') | map(attribute='stdout_lines') | flatten | unique) }}"
       delegate_to: localhost
-      when: disk_models.stdout_lines is defined
+      run_once: true
+      when: inventory_hostname == ansible_play_hosts[-1]
 
     - name: Display unique disk models
       ansible.builtin.debug:
-        msg: "{{ hostvars['localhost']['ansible_facts']['all_unique_models'] }}"
+        msg: "{{ hostvars['localhost']['all_unique_models'] }}"
       delegate_to: localhost
       run_once: true
