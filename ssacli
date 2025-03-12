@@ -5,20 +5,19 @@
   tasks:
     - name: Get disk models using ssacli
       ansible.builtin.shell: |
-        sudo ssacli ctrl all show config detail | grep "Model:" | awk '{print $3}' | sort -u
+        ssacli ctrl all show config detail | grep "Model:" | awk '{print $3}' | sort -u
       register: disk_models
       changed_when: false
       failed_when: disk_models.rc != 0 and disk_models.rc != 1  # Игнорируем ошибки, если контроллера нет
 
-    - name: Aggregate disk models to localhost
+    - name: Collect disk models from all hosts
       ansible.builtin.set_fact:
-        all_unique_models: "{{ (ansible_facts.all_unique_models | default([])) | union(disk_models.stdout_lines) }}"
+        all_unique_models: "{{ (hostvars['localhost']['all_unique_models'] | default([])) | union(disk_models.stdout_lines) }}"
       delegate_to: localhost
-      run_once: true
       when: disk_models.stdout_lines is defined
 
     - name: Display unique disk models
       ansible.builtin.debug:
         msg: "{{ hostvars['localhost']['all_unique_models'] }}"
-      run_once: true
       delegate_to: localhost
+      run_once: true
