@@ -1,0 +1,21 @@
+---
+- name: Get unique disk models using ssacli
+  hosts: all
+  become: yes  # Для выполнения с sudo
+  tasks:
+    - name: Get disk models using ssacli
+      ansible.builtin.shell: |
+        sudo ssacli ctrl all show config detail | grep "Model:" | awk '{print $2}' | sort -u
+      register: disk_models
+      changed_when: false
+      failed_when: disk_models.rc != 0 and disk_models.rc != 1  # Игнорируем ошибки, если контроллера нет
+
+    - name: Collect unique disk models across all hosts
+      ansible.builtin.set_fact:
+        unique_models: "{{ (unique_models | default([])) | union(disk_models.stdout_lines) }}"
+      delegate_facts: true
+
+    - name: Display unique disk models
+      ansible.builtin.debug:
+        msg: "{{ unique_models }}"
+      when: inventory_hostname == ansible_play_hosts[-1]  # Вывод на последнем хосте
