@@ -12,13 +12,12 @@
 
     - name: Collect disk models from all hosts
       ansible.builtin.set_fact:
-        all_unique_models: "{{ (hostvars['localhost'].get('all_unique_models', []) | default([])) | union(disk_models.stdout_lines) }}"
+        all_unique_models: "{{ (ansible_facts.all_unique_models | default([])) | union(disk_models.stdout_lines) }}"
       delegate_to: localhost
       when: disk_models.stdout_lines is defined
 
     - name: Display unique disk models
       ansible.builtin.debug:
-        msg: "{{ hostvars['localhost']['all_unique_models'] }}"
+        msg: "{{ hostvars['localhost']['ansible_facts']['all_unique_models'] }}"
       delegate_to: localhost
       run_once: true
-      when: inventory_hostname == ansible_play_hosts[-1]  # Вывод только на последнем хосте
